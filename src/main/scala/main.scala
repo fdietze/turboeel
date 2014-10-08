@@ -27,9 +27,21 @@ class Downloader(transfer:DccFileTransfer) extends Actor {
 }
 
 class IrcServerConnection(server:String) extends Actor {
-  val bot = new PircBot {
+
+
+  val bot : PircBot = new PircBot {
     override def onPrivateMessage(sender:String, login:String, hostname:String, message:String) {
-      println(message)
+      Main.messageHandlers map {
+        _ match {
+          case mhb@MessageHandler.Box(t) => mhb.tcInst.handle(
+            t,
+            ChatMessage(
+              content = message,
+              sender = sender,
+              receiver = IRCBot.Box(bot)
+              ))
+        }
+      }
     }
     override def onIncomingFileTransfer(transfer:DccFileTransfer) {
       context.actorOf(Props(classOf[Downloader], transfer))
@@ -111,8 +123,18 @@ class CommandServer(turboEel:ActorRef) extends Actor {
 }
 
 object Main extends App {
+
+  var messageHandlers : List[MessageHandler.Box[_]] = List.empty
+
   val system = ActorSystem("turboeel")
   val turboEel = system.actorOf(Props[TurboEel])
+
+  /// Add a message handler that simply prints out
+  messageHandlers :+= MessageHandler.Box((msg : ChatMessage) => {
+                                           println(s"Received message from ${msg.sender} to bot ${msg.receiver.name}: ${msg.content}")
+  })
+
+  turboEel ! Download("irc.freenode.net", "#testchannel2", "joreji", "10")
 
   sys addShutdownHook {
     println("Shutdown Hook!")
