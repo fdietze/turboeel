@@ -134,8 +134,6 @@ object Main extends App {
                                            println(s"Received message from ${msg.sender} to bot ${msg.receiver.name}: ${msg.content}")
   })
 
-  turboEel ! Download("irc.freenode.net", "#testchannel2", "joreji", "10")
-
   sys addShutdownHook {
     println("Shutdown Hook!")
   }
