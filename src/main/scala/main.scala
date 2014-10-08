@@ -2,30 +2,32 @@ import akka.actor.{ ActorRef, ActorSystem, Props, Actor, Inbox }
 import scala.concurrent.duration._
 import org.jibble.pircbot._
 import collection.mutable
+import akka.actor.{ Actor, ActorRef, Props }
+import akka.io.{ IO, Tcp }
+import akka.util.ByteString
+import java.net.InetSocketAddress
 import java.io.File
 
-case class Connect(server: String)
 case class Join(channel: String)
 case class Download(server: String, channel:String, botname: String, pack: String)
-case object Status
+case object PrintStatus
 
-class Downloader(val transfer:DccFileTransfer) extends Actor {
+class Downloader(transfer:DccFileTransfer) extends Actor {
   val file = transfer.getFile();
 
   override def preStart() {
     println("starting download")
     transfer.receive(file, true);
-    Main.system.scheduler.schedule(0.seconds, 5.second, self, Status)(Main.system.dispatcher)
+    Main.system.scheduler.schedule(0.seconds, 5.second, self, PrintStatus)(Main.system.dispatcher)
   }
 
   def receive = {
-    case Status => println(f"$file%s: ${transfer.getProgressPercentage}%5.2f%% ${transfer.getTransferRate / 8192}%7dKib/s")
+    case PrintStatus => println(f"$file%s: ${transfer.getProgressPercentage}%5.2f%% ${transfer.getTransferRate / 8192}%7dKib/s")
   }
 }
 
-class IrcServer extends Actor {
+class IrcServerConnection(server:String) extends Actor {
   val bot = new PircBot {
-
     override def onPrivateMessage(sender:String, login:String, hostname:String, message:String) {
       println(message)
     }
@@ -34,27 +36,28 @@ class IrcServer extends Actor {
     }
   }
 
-  def receive = {
-    case Connect(server) =>
-      var tries = 0
-      var nick = "eel"
-      var fullNick = nick
-      do {
-        try {
-          println(s"connecting to $server as $fullNick")
-          bot.connect(server)
-          bot.changeNick(fullNick)
-        }
-        catch {
-          case exception:Throwable =>
-            println(exception.getMessage)
-            // exception match {
-            //   //TODO: case e:NickAlreadyInUseException => fullNick = nick + tries
-            // }
-        }
-        tries += 1
-      } while(!bot.isConnected && tries < 3)
+  override def preStart() {
+    var tries = 0
+    var nick = "eel"
+    var fullNick = nick
+    do {
+      try {
+        println(s"connecting to $server as $fullNick")
+        bot.connect(server)
+        bot.changeNick(fullNick)
+      }
+      catch {
+        case exception:Throwable =>
+          println(exception.getMessage)
+          // exception match {
+             //TODO: case e:NickAlreadyInUseException => fullNick = nick + tries
+          // }
+      }
+      tries += 1
+    } while(!bot.isConnected && tries < 3)
+  }
 
+  def receive = {
     case Join(channel)   =>
       bot.joinChannel(channel)
       println(s"joining $channel")
@@ -66,24 +69,50 @@ class IrcServer extends Actor {
 }
 
 class TurboEel extends Actor {
-  val servers = mutable.HashMap.empty[String, ActorRef].withDefault{
-    server =>
-      val ircServer = Main.system.actorOf(Props[IrcServer])
-      ircServer ! Connect(server)
-      ircServer
+  import context.system
+  val commandServer = system.actorOf(Props(classOf[CommandServer], self))
+  val ircServers = mutable.HashMap.empty[String, ActorRef].withDefault {
+    server => system.actorOf(Props(classOf[IrcServerConnection], server))
   }
 
   def receive = {
-    case download@Download(server, _, _, _) =>
-      servers(server) ! download
+    case download@Download(server, _, _, _) => ircServers(server) ! download
+  }
+}
+
+class CommandClient(turboEel:ActorRef) extends Actor {
+  import Tcp._
+  def receive = {
+    case Received(data) =>
+      data.utf8String.split(" ").toList match {
+        case "get" :: server :: channel :: botname :: pack :: Nil =>
+          turboEel ! Download(server, channel, botname, pack)
+        case _ => sender() ! Write(ByteString("unknown command or wrong number of arguments\n"))
+
+      }
+    case PeerClosed     => context stop self
+  }
+}
+
+class CommandServer(turboEel:ActorRef) extends Actor {
+  import Tcp._
+  import context.system
+
+  IO(Tcp) ! Bind(self, new InetSocketAddress("localhost", 3532))
+
+  def receive = {
+    case b @ Bound(localAddress) =>
+    case CommandFailed(_: Bind) => context stop self
+    case c @ Connected(remote, local) =>
+      val handler = context.actorOf(Props(classOf[CommandClient], turboEel))
+      val connection = sender()
+      connection ! Register(handler)
   }
 }
 
 object Main extends App {
   val system = ActorSystem("turboeel")
   val turboEel = system.actorOf(Props[TurboEel])
-
-  turboEel ! Download("irc.freenode.net", "#hhhhuuuu", "botname", "168")
 
   sys addShutdownHook {
     println("Shutdown Hook!")
