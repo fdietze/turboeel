@@ -37,42 +37,33 @@ object IRCBot {
   /// type class impl. for PircBot
   implicit object TCIRCBot_PircBot extends IRCBot[org.jibble.pircbot.PircBot] {
     def name(bot : org.jibble.pircbot.PircBot) = bot.getNick
-    def join(bot : org.jibble.pircbot.PircBot, chan : Channel) {bot.joinChannel(chan.name)}
+    def join(bot : org.jibble.pircbot.PircBot, chan : Channel) {
+      println(s"Joining channel ${chan.name}")
+      bot.joinChannel(chan.name)
+    }
   }
 
 }
 
 
-// wrapper for a chat message. This can be a message inside a channel,
-// or a private message
-case class ChatMessage(content : String,
-                       sender : String,
-                       receiver : IRCBot.Box[_]
-                       // date : String
-)
-
 // type class for anything that can handle a message
-trait MessageHandler[T] {
+trait EventHandler[T] {
 
-  def handle(self : T, message : ChatMessage)
+  def handle(self : T, message : Event)
 
 }
 
 
-/// some common type class impl. for MessageHandler
-object MessageHandler {
+/// some common type class impl. for EventHandler
+object EventHandler {
 
-  /// Box for anything that has a MessageHandler type class. Use for lists and such.
-  case class Box[T](t:T)(implicit val tcInst : MessageHandler[T])
+  /// Box for anything that has a EventHandler type class. Use for lists and such.
+  case class Box[T](t:T)(implicit val tcInst : EventHandler[T])
 
 
   /// ensure simple functions can be passed as a message handler
-  implicit object TCMessageHandler_FunctionStringUnit extends MessageHandler[(String) => Unit] {
-    def handle(self : (String) => Unit, msg : ChatMessage) {self(msg.content)}
-  }
-
-  implicit object TCMessageHandler_FunctionChatMessageUnit extends MessageHandler[(ChatMessage) => Unit] {
-    def handle(self : (ChatMessage) => Unit, msg : ChatMessage) {self(msg)}
+  implicit object TCEventHandler_FunctionChatMessageUnit extends EventHandler[(Event) => Unit] {
+    def handle(self : (Event) => Unit, event : Event) {self(event)}
   }
 
 }
@@ -80,14 +71,33 @@ object MessageHandler {
 
 /// Some message handler implementations that do different things
 /// based on what the message says
-object MessageHandlers {
+object PredefEventHandlers {
 
   // this handler will make sure the bot joins the requested channel,
   // so that downloads won't be stopped/rejected
-  def handleJoinRequestMessage(msg : ChatMessage) {
+  def handleJoinRequestMessage(event : Event) {
+    val channelReg = "#[0-9A-Za-z_-]+".r
 
+    // TODO: check whether invite is legit?
+    event match {
+      case Event.Chat(content,_,receiver) => {
+        // if the private message contains another channel, join it
+        channelReg.findFirstIn(content) match {
+          case Some(m) => receiver.join(Channel(m))
+          case None =>
+        }
+      }
 
-
+      case Event.Topic(channel, topic, _, receiver) => {
+        // TODO: exclude the channel name itself
+        // if the topic contains another channel, join it
+        channelReg.findFirstIn(topic) match {
+          case Some(m) => receiver.join(Channel(m))
+          case None =>
+        }
+      }
+      case _ =>
+    }
   }
 
 }

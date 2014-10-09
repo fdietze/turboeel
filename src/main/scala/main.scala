@@ -31,13 +31,42 @@ class IrcServerConnection(server:String) extends Actor {
 
   val bot : PircBot = new PircBot {
     override def onPrivateMessage(sender:String, login:String, hostname:String, message:String) {
-      Main.messageHandlers map {
+      Main.eventHandlers map {
         _ match {
-          case mhb@MessageHandler.Box(t) => mhb.tcInst.handle(
+          case mhb@EventHandler.Box(t) => mhb.tcInst.handle(
             t,
-            ChatMessage(
+            Event.Chat(
               content = message,
               sender = sender,
+              receiver = IRCBot.Box(bot)
+              ))
+        }
+      }
+    }
+    /// Called whenever someone (including this bot) joins a channel
+    override def onJoin(channel:String, sender: String, login: String, hostname: String) {
+      Main.eventHandlers map {
+        _ match {
+          case mhb@EventHandler.Box(t) => mhb.tcInst.handle(
+            t,
+            Event.Join(
+              channel = channel,
+              who = sender,
+              receiver =IRCBot.Box(bot)
+              ))
+        }
+      }
+    }
+    /// Called whenever a topic is sent to the bot
+    override def onTopic(channel:String, topic: String, setBy: String, date: Long, changed: Boolean) {
+      Main.eventHandlers map {
+        _ match {
+          case mhb@EventHandler.Box(t) => mhb.tcInst.handle(
+            t,
+            Event.Topic(
+              channel = channel,
+              topic = topic,
+              setBy = setBy,
               receiver = IRCBot.Box(bot)
               ))
         }
@@ -89,6 +118,7 @@ class TurboEel extends Actor {
 
   def receive = {
     case download@Download(server, _, _, _) => ircServers(server) ! download
+    //case join@Join(server, _) => ircServers(server) ! join
   }
 }
 
@@ -99,6 +129,9 @@ class CommandClient(turboEel:ActorRef) extends Actor {
       data.utf8String.split(" ").toList match {
         case "get" :: server :: channel :: botname :: pack :: Nil =>
           turboEel ! Download(server, channel, botname, pack)
+        // TODO:
+        // case "join" :: server :: channel :: Nil =>
+        //   turboEel ! Join(server, channel)
         case _ => sender() ! Write(ByteString("unknown command or wrong number of arguments\n"))
 
       }
@@ -124,15 +157,21 @@ class CommandServer(turboEel:ActorRef) extends Actor {
 
 object Main extends App {
 
-  var messageHandlers : List[MessageHandler.Box[_]] = List.empty
+  var eventHandlers : List[EventHandler.Box[_]] = List.empty
 
   val system = ActorSystem("turboeel")
   val turboEel = system.actorOf(Props[TurboEel])
 
-  /// Add a message handler that simply prints out
-  messageHandlers :+= MessageHandler.Box((msg : ChatMessage) => {
-                                           println(s"Received message from ${msg.sender} to bot ${msg.receiver.name}: ${msg.content}")
+  /// Add a Event handler that simply prints out any chat message
+  eventHandlers :+= EventHandler.Box(
+    (event : Event) => event match {
+      case Event.Chat(content, sender, receiver) => println(s"Received message from ${sender} to bot ${receiver.name}: ${content}")
+      case _ =>
   })
+  /// Add some more message handlers
+  eventHandlers :+= EventHandler.Box(PredefEventHandlers.handleJoinRequestMessage _)
+
+  //turboEel ! Download("irc.freenode.net","#testchannel2", "joreji", "10")
 
   sys addShutdownHook {
     println("Shutdown Hook!")
