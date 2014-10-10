@@ -110,14 +110,14 @@ class IrcServerConnection(server:String) extends Actor {
     var fullNick = nick
     do {
       try {
-        println(s"connecting to $server as $fullNick")
+        println(s"$server: connecting as $fullNick")
         bot.changeNick(fullNick)
         bot.connect(server)
         bot.changeNick(fullNick)
       }
       catch {
         case exception:Throwable =>
-          println(exception.getMessage)
+          println(s"$server: ${exception.getMessage}")
           // exception match {
              //TODO: case e:NickAlreadyInUseException => fullNick = nick + tries
           // }
@@ -237,7 +237,7 @@ object Main extends App {
   /// Add a Event handler that simply prints out any chat message
   eventHandlers :+= EventHandler.Box(
     (event : Event) => event match {
-      case Event.Chat(content, sender, receiver) => println(s"Received message from ${sender} to bot ${receiver.name}: ${content}")
+      case Event.Chat(content, sender, receiver) => println(s"Received message from ${sender} to bot ${receiver.name}:\n${content}")
       case _ =>
   })
   /// Add some more message handlers
