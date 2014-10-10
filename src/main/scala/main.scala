@@ -166,13 +166,17 @@ class CommandClient(turboEel:ActorRef) extends Actor {
   import Tcp._
   def receive = {
     case Received(data) =>
-      data.utf8String.split(" ").toList match {
+      data.utf8String.trim.split(" ").toList match {
         case "get" :: server :: channel :: botname :: pack :: Nil =>
           turboEel ! Download(server, channel, botname, pack)
         // TODO:
         // case "join" :: server :: channel :: Nil =>
         //   turboEel ! Join(server, channel)
-        case _ => sender() ! Write(ByteString("unknown command or wrong number of arguments\n"))
+
+        case "shutdown" :: Nil =>
+          Main.shutdown()
+
+        case m => sender() ! Write(ByteString(s"unknown command or wrong number of arguments: $m\n"))
 
       }
     case PeerClosed     => context stop self
@@ -203,6 +207,11 @@ object Main extends App {
   val system = ActorSystem("world")
   val turboEel = system.actorOf(Props[TurboEel], "turboeel")
 
+  def shutdown() {
+    println("shutting down...")
+    system.shutdown()
+  }
+
   /// Add a Event handler that simply prints out any chat message
   eventHandlers :+= EventHandler.Box(
     (event : Event) => event match {
@@ -214,7 +223,5 @@ object Main extends App {
 
   //turboEel ! Download("irc.freenode.net","#testchannel2", "joreji", "10")
 
-  sys addShutdownHook {
-    println("Shutdown Hook!")
-  }
+  sys addShutdownHook { shutdown() }
 }
