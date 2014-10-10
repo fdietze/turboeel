@@ -90,10 +90,8 @@ object PredefEventHandlers {
 
       case Event.Topic(channel, topic, _, receiver) => {
         // TODO: exclude the channel name itself
-        // if the topic contains another channel, join it
-        channelReg.findFirstIn(topic) match {
-          case Some(m) => receiver.join(Channel(m))
-          case None =>
+        channelReg.findAllIn(topic).matchData foreach { m =>
+          receiver.join(Channel(m.matched))
         }
       }
       case _ =>
