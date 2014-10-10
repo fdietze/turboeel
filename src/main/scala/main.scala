@@ -15,10 +15,25 @@ case object PrintStatus
 class Downloader(transfer:DccFileTransfer) extends Actor {
   val file = transfer.getFile();
 
+  def receivedBytes : Long = {
+    transfer.getProgress
+  }
+
+  def totalBytes : Long = {
+    transfer.getSize
+  }
+
+  def close() {
+    transfer.close()
+  }
+
   override def preStart() {
     println("starting download")
     transfer.receive(file, true);
     Main.system.scheduler.schedule(0.seconds, 5.second, self, PrintStatus)(Main.system.dispatcher)
+
+    // start a watchdog
+    context.actorOf(Props(classOf[Watchdog], this))
   }
 
   def receive = {
