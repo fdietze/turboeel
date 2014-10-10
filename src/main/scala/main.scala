@@ -119,6 +119,7 @@ class IrcServerConnection(server:String) extends Actor {
     do {
       try {
         println(s"connecting to $server as $fullNick")
+        bot.changeNick(fullNick)
         bot.connect(server)
         bot.changeNick(fullNick)
       }
