@@ -20,6 +20,10 @@ class Watchdog(download: scala.ref.WeakReference[Downloader]) extends Actor {
 
   }
 
+  override def postStop(): Unit = {
+    updateClock.cancel()
+  }
+
   /// IF the downloader is no longer active, stop watching it
   def checkDownloaderState() {
     download.get map { download =>

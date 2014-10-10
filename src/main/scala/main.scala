@@ -10,6 +10,7 @@ import java.io.File
 
 case class Join(channel: String)
 case class Download(server: String, channel:String, botname: String, pack: String)
+case object Disconnect
 case object PrintStatus
 
 class Downloader(transfer:DccFileTransfer) extends Actor {
@@ -39,6 +40,10 @@ class Downloader(transfer:DccFileTransfer) extends Actor {
 
     // start a watchdog
     context.actorOf(Props(classOf[Watchdog], scala.ref.WeakReference(this)))
+  }
+
+  override def postStop(): Unit = {
+    printClock.cancel()
   }
 
   /// Check transfer completeness and disable printClock if done
@@ -136,6 +141,9 @@ class IrcServerConnection(server:String) extends Actor {
     case Download(_, channel, botname, pack) =>
       self ! Join(channel)
       bot.sendMessage(botname, s"xdcc get #$pack")
+
+    case Disconnect =>
+      bot.disconnect()
   }
 }
 
@@ -150,6 +158,11 @@ class TurboEel extends Actor {
     case download@Download(server, _, _, _) =>
       ircServers.getOrElseUpdate(server, newConnection(server)) ! download
     //case join@Join(server, _) => ircServers(server) ! join
+  }
+
+  override def postStop() {
+    for((server,ircConnActor) <- ircServers)
+      ircConnActor ! Disconnect
   }
 }
 
