@@ -91,6 +91,7 @@ class IrcServerConnection(server:String) extends Actor {
                            setBy = setBy,
                            receiver = IRCBot.Box(bot)))
     }
+
     override def onIncomingFileTransfer(transfer:DccFileTransfer) {
       Main.dispatchEvent(Event.DccFileTransfer(transfer=transfer,receiver = IRCBot.Box(bot)))
       if(botnamesWhitelist contains transfer.getNick)
@@ -98,7 +99,10 @@ class IrcServerConnection(server:String) extends Actor {
       else
         println(s"Ignoring file transfer from ${transfer.getNick} as it was not requested (file is: ${transfer.getFile})")
     }
+
   }
+
+  def isInChannel(channel:String) = bot.getChannels.map(_.toLowerCase) contains channel.toLowerCase
 
   override def preStart() {
     var tries = 0
@@ -137,8 +141,10 @@ class IrcServerConnection(server:String) extends Actor {
 
   def receive = {
     case Join(channel)   =>
-      bot.joinChannel(channel)
-      println(s"joining $channel")
+      if( !isInChannel(channel) ) {
+        println(s"$server: joining $channel")
+        bot.joinChannel(channel)
+      }
 
     case Download(_, channel, botname, pack) =>
       botnamesWhitelist :+= botname
