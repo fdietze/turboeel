@@ -103,7 +103,7 @@ class IrcServerConnection(server:String) extends Actor {
       }
     }
     override def onIncomingFileTransfer(transfer:DccFileTransfer) {
-      actorOf(Props(classOf[Downloader], transfer))
+      actorOf(Props(classOf[Downloader], transfer), transfer.getFile.getName)
     }
   }
 
@@ -141,7 +141,7 @@ class IrcServerConnection(server:String) extends Actor {
 
 class TurboEel extends Actor {
   import context.actorOf
-  val commandServer = actorOf(Props(classOf[CommandServer], self))
+  val commandServer = actorOf(Props(classOf[CommandServer], self), "commandserver")
   val ircServers = mutable.HashMap.empty[String, ActorRef]
   def newConnection(server:String) =
     actorOf(Props(classOf[IrcServerConnection], server), server)
@@ -190,7 +190,7 @@ class CommandServer(turboEel:ActorRef) extends Actor {
     case b @ Bound(localAddress) =>
     case CommandFailed(_: Bind) => context stop self
     case c @ Connected(remote, local) =>
-      val handler = actorOf(Props(classOf[CommandClient], turboEel))
+      val handler = actorOf(Props(classOf[CommandClient], turboEel),"commandclient")
       val connection = sender()
       connection ! Register(handler)
   }
