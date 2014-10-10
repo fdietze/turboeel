@@ -57,7 +57,7 @@ class Downloader(transfer:DccFileTransfer) extends Actor {
 }
 
 class IrcServerConnection(server:String) extends Actor {
-
+  import context.actorOf
 
   val bot : PircBot = new PircBot {
     override def onPrivateMessage(sender:String, login:String, hostname:String, message:String) {
@@ -103,7 +103,7 @@ class IrcServerConnection(server:String) extends Actor {
       }
     }
     override def onIncomingFileTransfer(transfer:DccFileTransfer) {
-      context.actorOf(Props(classOf[Downloader], transfer))
+      actorOf(Props(classOf[Downloader], transfer))
     }
   }
 
@@ -140,14 +140,15 @@ class IrcServerConnection(server:String) extends Actor {
 }
 
 class TurboEel extends Actor {
-  import context.system
-  val commandServer = system.actorOf(Props(classOf[CommandServer], self))
-  val ircServers = mutable.HashMap.empty[String, ActorRef].withDefault {
-    server => system.actorOf(Props(classOf[IrcServerConnection], server))
-  }
+  import context.actorOf
+  val commandServer = actorOf(Props(classOf[CommandServer], self))
+  val ircServers = mutable.HashMap.empty[String, ActorRef]
+  def newConnection(server:String) =
+    actorOf(Props(classOf[IrcServerConnection], server), server)
 
   def receive = {
-    case download@Download(server, _, _, _) => ircServers(server) ! download
+    case download@Download(server, _, _, _) =>
+      ircServers.getOrElseUpdate(server, newConnection(server)) ! download
     //case join@Join(server, _) => ircServers(server) ! join
   }
 }
@@ -180,6 +181,7 @@ class CommandClient(turboEel:ActorRef) extends Actor {
 
 class CommandServer(turboEel:ActorRef) extends Actor {
   import Tcp._
+  import context.actorOf
   import context.system
 
   IO(Tcp) ! Bind(self, new InetSocketAddress("localhost", 3532))
@@ -188,7 +190,7 @@ class CommandServer(turboEel:ActorRef) extends Actor {
     case b @ Bound(localAddress) =>
     case CommandFailed(_: Bind) => context stop self
     case c @ Connected(remote, local) =>
-      val handler = context.actorOf(Props(classOf[CommandClient], turboEel))
+      val handler = actorOf(Props(classOf[CommandClient], turboEel))
       val connection = sender()
       connection ! Register(handler)
   }
@@ -198,8 +200,8 @@ object Main extends App {
 
   var eventHandlers : List[EventHandler.Box[_]] = List.empty
 
-  val system = ActorSystem("turboeel")
-  val turboEel = system.actorOf(Props[TurboEel])
+  val system = ActorSystem("world")
+  val turboEel = system.actorOf(Props[TurboEel], "turboeel")
 
   /// Add a Event handler that simply prints out any chat message
   eventHandlers :+= EventHandler.Box(
