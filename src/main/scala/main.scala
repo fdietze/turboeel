@@ -137,6 +137,15 @@ class TurboEel extends Actor {
   }
 }
 
+/// Parses data incoming through the socket. Use a program such as
+/// netcat (e.g. netcat -v localhost 3532) to send commands.
+///
+/// Currently implemented commands are:
+///
+/// 1. get <server> <channel> <botname> <pack>
+///
+///    Will start downloading an xdcc packet from the specified bot
+///    inside the channel at the server
 class CommandClient(turboEel:ActorRef) extends Actor {
   import Tcp._
   def receive = {
