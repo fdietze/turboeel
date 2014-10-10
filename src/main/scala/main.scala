@@ -14,6 +14,7 @@ case object PrintStatus
 
 class Downloader(transfer:DccFileTransfer) extends Actor {
   val file = transfer.getFile();
+  lazy val printClock = Main.system.scheduler.schedule(0.seconds, 5.second, self, PrintStatus)(Main.system.dispatcher)
 
   def receivedBytes : Long = {
     transfer.getProgress
@@ -23,21 +24,35 @@ class Downloader(transfer:DccFileTransfer) extends Actor {
     transfer.getSize
   }
 
+  private[this] var _closed = false
   def close() {
+    _closed = true
     transfer.close()
+    printClock.cancel()
   }
+  def isClosed = _closed
 
   override def preStart() {
     println("starting download")
     transfer.receive(file, true);
-    Main.system.scheduler.schedule(0.seconds, 5.second, self, PrintStatus)(Main.system.dispatcher)
+    printClock
 
     // start a watchdog
-    context.actorOf(Props(classOf[Watchdog], this))
+    context.actorOf(Props(classOf[Watchdog], scala.ref.WeakReference(this)))
+  }
+
+  /// Check transfer completeness and disable printClock if done
+  def checkStatus() {
+    if(receivedBytes == totalBytes) {
+      close()
+    }
   }
 
   def receive = {
-    case PrintStatus => println(f"$file%s: ${transfer.getProgressPercentage}%5.2f%% ${transfer.getTransferRate / 8192}%7dKib/s")
+    case PrintStatus => {
+      checkStatus()
+      println(f"$file%s: ${transfer.getProgressPercentage}%5.2f%% ${transfer.getTransferRate / 8192}%7dKib/s")
+    }
   }
 }
 
