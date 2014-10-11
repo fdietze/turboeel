@@ -8,6 +8,11 @@ object Event {
                   val who: String,
                   val receiver : IRCBot.Box[_]) extends Event
 
+  case class DccFileTransfer(
+    /// TODO: ideally this should be wrapped to not have the dependency here...
+    val transfer : org.jibble.pircbot.DccFileTransfer,
+    val receiver : IRCBot.Box[_]) extends Event
+
 
   case class Topic(val channel: String,
                    val topic: String,

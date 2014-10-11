@@ -27,7 +27,7 @@ class Downloader(transfer:DccFileTransfer) extends Actor {
 
   private[this] var _closed = false
   def close() {
-    if(!closed) {
+    if(!isClosed) {
       println(s"Closing transfer for ${file}")
       _closed = true
       transfer.close()
@@ -67,52 +67,32 @@ class Downloader(transfer:DccFileTransfer) extends Actor {
 class IrcServerConnection(server:String) extends Actor {
   import context.actorOf
 
+  /// Contains botnames that are allowed to send us data
   var botnamesWhitelist = List[String]()
 
   val bot : PircBot = new PircBot {
     override def onPrivateMessage(sender:String, login:String, hostname:String, message:String) {
-      Main.eventHandlers map {
-        _ match {
-          case mhb@EventHandler.Box(t) => mhb.tcInst.handle(
-            t,
-            Event.Chat(
-              content = message,
-              sender = sender,
-              receiver = IRCBot.Box(bot)
-              ))
-        }
-      }
+      Main.dispatchEvent(Event.Chat(content = message,
+                                    sender = sender,
+                                    receiver = IRCBot.Box(bot)))
     }
     /// Called whenever someone (including this bot) joins a channel
     override def onJoin(channel:String, sender: String, login: String, hostname: String) {
-      Main.eventHandlers map {
-        _ match {
-          case mhb@EventHandler.Box(t) => mhb.tcInst.handle(
-            t,
-            Event.Join(
-              channel = channel,
-              who = sender,
-              receiver =IRCBot.Box(bot)
-              ))
-        }
-      }
+      Main.dispatchEvent(Event.Join(
+                           channel = channel,
+                           who = sender,
+                           receiver =IRCBot.Box(bot)))
     }
     /// Called whenever a topic is sent to the bot
     override def onTopic(channel:String, topic: String, setBy: String, date: Long, changed: Boolean) {
-      Main.eventHandlers map {
-        _ match {
-          case mhb@EventHandler.Box(t) => mhb.tcInst.handle(
-            t,
-            Event.Topic(
-              channel = channel,
-              topic = topic,
-              setBy = setBy,
-              receiver = IRCBot.Box(bot)
-              ))
-        }
-      }
+      Main.dispatchEvent(Event.Topic(
+                           channel = channel,
+                           topic = topic,
+                           setBy = setBy,
+                           receiver = IRCBot.Box(bot)))
     }
     override def onIncomingFileTransfer(transfer:DccFileTransfer) {
+      Main.dispatchEvent(Event.DccFileTransfer(transfer=transfer,receiver = IRCBot.Box(bot)))
       if(botnamesWhitelist contains transfer.getNick)
         actorOf(Props(classOf[Downloader], transfer), transfer.getFile.getName)
       else
@@ -233,7 +213,12 @@ class CommandServer(turboEel:ActorRef) extends Actor {
 
 object Main extends App {
 
+  /// List containing EventHandler-like things that will be passed events
   var eventHandlers : List[EventHandler.Box[_]] = List.empty
+
+  def dispatchEvent(event : Event) {
+    eventHandlers map {_ match {case mhb@EventHandler.Box(t) => mhb.tcInst.handle(t, event)}}
+  }
 
   val system = ActorSystem("world")
   val turboEel = system.actorOf(Props[TurboEel], "turboeel")
@@ -251,8 +236,6 @@ object Main extends App {
   })
   /// Add some more message handlers
   eventHandlers :+= EventHandler.Box(PredefEventHandlers.handleJoinRequestMessage _)
-
-  //turboEel ! Download("irc.freenode.net","#testchannel2", "joreji", "10")
 
   sys addShutdownHook { shutdown() }
 }
