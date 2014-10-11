@@ -27,10 +27,12 @@ class Downloader(transfer:DccFileTransfer) extends Actor {
 
   private[this] var _closed = false
   def close() {
-    println(s"Closing transfer for ${file}")
-    _closed = true
-    transfer.close()
-    printClock.cancel()
+    if(!closed) {
+      println(s"Closing transfer for ${file}")
+      _closed = true
+      transfer.close()
+      printClock.cancel()
+    }
   }
   def isClosed = _closed
 
@@ -179,11 +181,6 @@ class TurboEel extends Actor {
     case download@Download(server, _, _, _) =>
       ircServers.getOrElseUpdate(server, newConnection(server)) ! download
     //case join@Join(server, _) => ircServers(server) ! join
-  }
-
-  override def postStop() {
-    for((server,ircConnActor) <- ircServers)
-      ircConnActor ! Disconnect
   }
 }
 
