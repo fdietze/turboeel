@@ -25,7 +25,7 @@ class Watchdog(download: scala.ref.WeakReference[Downloader]) extends Actor {
   }
 
   /// IF the downloader is no longer active, stop watching it
-  def checkDownloaderState() {
+  def checkDownloaderState() = {
     download.get map { download =>
       if(download.isClosed) {
         updateClock.cancel()
@@ -33,25 +33,30 @@ class Watchdog(download: scala.ref.WeakReference[Downloader]) extends Actor {
     }
     if(download.get == None)
       updateClock.cancel()
+
+    download.get match {
+      case Some(download) => !download.isClosed
+      case _ => false
+    }
   }
 
   def receive = {
 
     case UpdateWatch => {
-      checkDownloaderState()
-      download.get map { download =>
-        //println(s"Watching. Transmitted: ${download.receivedBytes}")
-        receivedBytesHist :+= download.receivedBytes
-        receivedBytesHist = receivedBytesHist.drop(max(0,receivedBytesHist.size - histSize))
+      if(checkDownloaderState())
+        download.get map { download =>
+          //println(s"Watching. Transmitted: ${download.receivedBytes}")
+          receivedBytesHist :+= download.receivedBytes
+          receivedBytesHist = receivedBytesHist.drop(max(0,receivedBytesHist.size - histSize))
 
-        if(receivedBytesHist.size >= histSize
-             && (receivedBytesHist.reduceLeft(min) == receivedBytesHist.reduceLeft(max))) {
+          if(receivedBytesHist.size >= histSize
+               && (receivedBytesHist.reduceLeft(min) == receivedBytesHist.reduceLeft(max))) {
 
-          println("Cancelling download because it has stalled")
-          download.close()
+            println("Cancelling download because it has stalled")
+            download.close()
 
+          }
         }
-      }
     }
 
   }

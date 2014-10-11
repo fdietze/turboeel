@@ -27,6 +27,7 @@ class Downloader(transfer:DccFileTransfer) extends Actor {
 
   private[this] var _closed = false
   def close() {
+    println(s"Closing transfer for ${file}")
     _closed = true
     transfer.close()
     printClock.cancel()
@@ -43,7 +44,7 @@ class Downloader(transfer:DccFileTransfer) extends Actor {
   }
 
   override def postStop(): Unit = {
-    printClock.cancel()
+    close()
   }
 
   /// Check transfer completeness and disable printClock if done
@@ -63,6 +64,8 @@ class Downloader(transfer:DccFileTransfer) extends Actor {
 
 class IrcServerConnection(server:String) extends Actor {
   import context.actorOf
+
+  var botnamesWhitelist = List[String]()
 
   val bot : PircBot = new PircBot {
     override def onPrivateMessage(sender:String, login:String, hostname:String, message:String) {
@@ -108,7 +111,10 @@ class IrcServerConnection(server:String) extends Actor {
       }
     }
     override def onIncomingFileTransfer(transfer:DccFileTransfer) {
-      actorOf(Props(classOf[Downloader], transfer), transfer.getFile.getName)
+      if(botnamesWhitelist contains transfer.getNick)
+        actorOf(Props(classOf[Downloader], transfer), transfer.getFile.getName)
+      else
+        println(s"Ignoring file transfer from ${transfer.getNick} as it was not requested (file is: ${transfer.getFile})")
     }
   }
 
@@ -134,17 +140,31 @@ class IrcServerConnection(server:String) extends Actor {
     } while(!bot.isConnected && tries < 3)
   }
 
+  override def postStop() {
+    disconnect()
+    // free up any resources that the bot used (including threads)
+    bot.dispose()
+  }
+
+  private[this] def disconnect() {
+    if(bot.isConnected) {
+      println(s"Disconnecting from network ${server}")
+      bot.disconnect()
+    }
+  }
+
   def receive = {
     case Join(channel)   =>
       bot.joinChannel(channel)
       println(s"joining $channel")
 
     case Download(_, channel, botname, pack) =>
+      botnamesWhitelist :+= botname
       self ! Join(channel)
       bot.sendMessage(botname, s"xdcc get #$pack")
 
     case Disconnect =>
-      bot.disconnect()
+      disconnect()
   }
 }
 
