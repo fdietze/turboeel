@@ -7,15 +7,16 @@ import akka.io.{ IO, Tcp }
 import akka.util.ByteString
 import java.net.InetSocketAddress
 import java.io.File
+import akka.actor.Terminated
 
 case class Join(channel: String)
 case class Download(server: String, channel:String, botname: String, pack: String)
-case object Disconnect
 case object PrintStatus
 
 class Downloader(transfer:DccFileTransfer) extends Actor {
+  import context.dispatcher
   val file = transfer.getFile();
-  lazy val printClock = Main.system.scheduler.schedule(0.seconds, 5.second, self, PrintStatus)(Main.system.dispatcher)
+  lazy val printStatusScheduler = context.system.scheduler.schedule(0.seconds, 5.second, self, PrintStatus)
 
   def receivedBytes : Long = {
     transfer.getProgress
@@ -28,28 +29,23 @@ class Downloader(transfer:DccFileTransfer) extends Actor {
   private[this] var _closed = false
   def close() {
     if(!isClosed) {
-      println(s"Closing transfer for ${file}")
       _closed = true
-      transfer.close()
-      printClock.cancel()
+      try{ transfer.close() } catch { case _:Throwable => }
+      printStatusScheduler.cancel()
+      println(s"$file: closed")
     }
   }
   def isClosed = _closed
 
   override def preStart() {
-    println("starting download")
     transfer.receive(file, true);
-    printClock
+    printStatusScheduler
 
     // start a watchdog
-    context.actorOf(Props(classOf[Watchdog], scala.ref.WeakReference(this)))
+    context.actorOf(Props(classOf[Watchdog], scala.ref.WeakReference(this)), "watchdog")
   }
 
-  override def postStop(): Unit = {
-    close()
-  }
-
-  /// Check transfer completeness and disable printClock if done
+  /// Check transfer completeness and disable printStatusScheduler if done
   def checkStatus() {
     if(receivedBytes == totalBytes) {
       close()
@@ -62,6 +58,10 @@ class Downloader(transfer:DccFileTransfer) extends Actor {
       println(f"$file%s: ${transfer.getProgressPercentage}%5.2f%% ${transfer.getTransferRate / 8192}%7dKib/s")
     }
   }
+
+  override def postStop(): Unit = {
+    close()
+  }
 }
 
 class IrcServerConnection(server:String) extends Actor {
@@ -72,20 +72,20 @@ class IrcServerConnection(server:String) extends Actor {
 
   val bot : PircBot = new PircBot {
     override def onPrivateMessage(sender:String, login:String, hostname:String, message:String) {
-      Main.dispatchEvent(Event.Chat(content = message,
+      Turboeel.dispatchEvent(Event.Chat(content = message,
                                     sender = sender,
                                     receiver = IRCBot.Box(bot)))
     }
     /// Called whenever someone (including this bot) joins a channel
     override def onJoin(channel:String, sender: String, login: String, hostname: String) {
-      Main.dispatchEvent(Event.Join(
+      Turboeel.dispatchEvent(Event.Join(
                            channel = channel,
                            who = sender,
                            receiver =IRCBot.Box(bot)))
     }
     /// Called whenever a topic is sent to the bot
     override def onTopic(channel:String, topic: String, setBy: String, date: Long, changed: Boolean) {
-      Main.dispatchEvent(Event.Topic(
+      Turboeel.dispatchEvent(Event.Topic(
                            channel = channel,
                            topic = topic,
                            setBy = setBy,
@@ -93,9 +93,9 @@ class IrcServerConnection(server:String) extends Actor {
     }
 
     override def onIncomingFileTransfer(transfer:DccFileTransfer) {
-      Main.dispatchEvent(Event.DccFileTransfer(transfer=transfer,receiver = IRCBot.Box(bot)))
+      Turboeel.dispatchEvent(Event.DccFileTransfer(transfer=transfer,receiver = IRCBot.Box(bot)))
       if(botnamesWhitelist contains transfer.getNick)
-        actorOf(Props(classOf[Downloader], transfer), transfer.getFile.getName)
+        actorOf(Props(classOf[Downloader], transfer), "download-"+transfer.getFile.getName)
       else
         println(s"Ignoring file transfer from ${transfer.getNick} as it was not requested (file is: ${transfer.getFile})")
     }
@@ -124,18 +124,9 @@ class IrcServerConnection(server:String) extends Actor {
       }
       tries += 1
     } while(!bot.isConnected && tries < 3)
-  }
-
-  override def postStop() {
-    disconnect()
-    // free up any resources that the bot used (including threads)
-    bot.dispose()
-  }
-
-  private[this] def disconnect() {
-    if(bot.isConnected) {
-      println(s"Disconnecting from network ${server}")
-      bot.disconnect()
+    if(!bot.isConnected) {
+      println(s"$server: sorry, couldn't connect")
+      context stop self
     }
   }
 
@@ -148,24 +139,35 @@ class IrcServerConnection(server:String) extends Actor {
 
     case Download(_, channel, botname, pack) =>
       botnamesWhitelist :+= botname
-      self ! Join(channel)
+      //TODO: watch downloaders per IrcServerConnection and manage queues, avoid duplicate downloads
+      self ! Join(channel) //TODO: completely remove channel from request and only join on error message from bot?
       bot.sendMessage(botname, s"xdcc get #$pack")
+  }
 
-    case Disconnect =>
-      disconnect()
+  override def postStop(): Unit = {
+    try{ bot.disconnect() } catch { case _:Throwable => }
+    println(s"$server: disconnected")
+
+    // free up any resources that the bot used (including threads)
+    try{ bot.dispose() } catch { case _:Throwable => }
+    println(s"$server: disposed")
   }
 }
 
-class TurboEel extends Actor {
+class ServerManager extends Actor {
   import context.actorOf
+  import context.watch
+
   val commandServer = actorOf(Props(classOf[CommandServer], self), "commandserver")
-  val ircServers = mutable.HashMap.empty[String, ActorRef]
-  def newConnection(server:String) =
-    actorOf(Props(classOf[IrcServerConnection], server), server)
+  var ircServers = mutable.HashMap.empty[String, ActorRef]
+  def newConnection(server:String):ActorRef = watch(actorOf(Props(classOf[IrcServerConnection], server), server))
+
 
   def receive = {
     case download@Download(server, _, _, _) =>
       ircServers.getOrElseUpdate(server, newConnection(server)) ! download
+    case Terminated(serverConnection) =>
+      ircServers = ircServers.filter(_._2 != serverConnection)
     //case join@Join(server, _) => ircServers(server) ! join
   }
 }
@@ -191,11 +193,17 @@ class CommandClient(turboEel:ActorRef) extends Actor {
         //   turboEel ! Join(server, channel)
 
         case "shutdown" :: Nil =>
-          Main.shutdown()
+          println("\nYou want me to leave? Okay, okay...")
+          println("Waiting for the remaining threads to die...")
+          context.system.registerOnTermination {
+            println("ActorSystem is down. The Program should exit soon.")
+          }
+          context.system.shutdown()
 
-        case m => sender() ! Write(ByteString(s"unknown command or wrong number of arguments: $m\n"))
+        case m => sender ! Write(ByteString(s"Yo what? $m\n"))
 
       }
+      sender ! Close
     case PeerClosed     => context stop self
   }
 }
@@ -211,13 +219,14 @@ class CommandServer(turboEel:ActorRef) extends Actor {
     case b @ Bound(localAddress) =>
     case CommandFailed(_: Bind) => context stop self
     case c @ Connected(remote, local) =>
-      val handler = actorOf(Props(classOf[CommandClient], turboEel),"commandclient")
-      val connection = sender()
+      val handler = actorOf(Props(classOf[CommandClient], turboEel),"commandclient-"+remote.getPort)
+      val connection = sender
       connection ! Register(handler)
   }
 }
 
-object Main extends App {
+object Turboeel extends App {
+  println("(running with one long slim leg.)")
 
   /// List containing EventHandler-like things that will be passed events
   var eventHandlers : List[EventHandler.Box[_]] = List.empty
@@ -227,12 +236,7 @@ object Main extends App {
   }
 
   val system = ActorSystem("world")
-  val turboEel = system.actorOf(Props[TurboEel], "turboeel")
-
-  def shutdown() {
-    println("shutting down...")
-    system.shutdown()
-  }
+  val turboEel = system.actorOf(Props[ServerManager], "servermanager")
 
   /// Add a Event handler that simply prints out any chat message
   eventHandlers :+= EventHandler.Box(
@@ -243,5 +247,7 @@ object Main extends App {
   /// Add some more message handlers
   eventHandlers :+= EventHandler.Box(PredefEventHandlers.handleJoinRequestMessage _)
 
-  sys addShutdownHook { shutdown() }
+  //turboEel ! Download("irc.freenode.net","#testchannel2", "joreji", "10")
+
+  sys addShutdownHook { system.shutdown() }
 }

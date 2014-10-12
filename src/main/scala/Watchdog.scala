@@ -14,7 +14,7 @@ class Watchdog(download: scala.ref.WeakReference[Downloader]) extends Actor {
   val histSize = 5
 
   /// initialized in preStart
-  lazy val updateClock = Main.system.scheduler.schedule(0.seconds, 5.second, self, UpdateWatch)(Main.system.dispatcher)
+  lazy val updateClock = Turboeel.system.scheduler.schedule(0.seconds, 5.second, self, UpdateWatch)(Turboeel.system.dispatcher)
 
   override def preStart() {
 
