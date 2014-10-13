@@ -110,11 +110,18 @@ class Downloader(transfer:DccFileTransfer) extends Actor {
     }
   }
 
+  def now = System.nanoTime
+  var lastProgress = (receivedBytes, now)
+
   def receive = {
     case PrintStatus => {
       checkStatus()
-      // TODO: correct speed calculation
-      println(f"$file%s: ${transfer.getProgressPercentage}%5.2f%% ${transfer.getTransferRate / 8192}%7dKib/s")
+      //TODO: correct start speed on resume
+      val bytesPerNanoSecond = (receivedBytes - lastProgress._1).toDouble / (now - lastProgress._2).toDouble
+      val mbPerSecond = (1000000000 * bytesPerNanoSecond/1024/1024)
+      println(f"$file%s: ${transfer.getProgressPercentage}%6.2f%%  ${mbPerSecond}%7.3f Mib/s")
+
+      lastProgress = (receivedBytes, now)
     }
   }
 
