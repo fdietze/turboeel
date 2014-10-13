@@ -1,3 +1,5 @@
+package turboeel
+
 import akka.actor.{ Actor, ActorRef, Props }
 import scala.concurrent.duration._
 import scala.math.{min,max}
@@ -6,8 +8,9 @@ case object UpdateWatch
 
 /// Watch a download. If its transfer speed goes zero, it will stop
 /// the download.
-///
+//
 /// TODO: Actually restart download
+// TODO: Why WeakReference?
 class Watchdog(download: scala.ref.WeakReference[Downloader]) extends Actor {
 
   var receivedBytesHist = List[Long]()
