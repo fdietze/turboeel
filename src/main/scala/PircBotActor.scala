@@ -72,6 +72,7 @@ trait PircBotActor extends Actor {
   val defaultBotActions:Receive = {
     case JoinChannel(channel)   =>
       if( !isInChannel(channel) ) {
+        // println("channels: " + bot.getChannels.mkString(", "))
         println(s"$server: joining $channel")
         bot.joinChannel(channel)
       }

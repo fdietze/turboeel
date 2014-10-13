@@ -39,6 +39,10 @@ class IrcServerConnection(val server:String) extends PircBotActor {
       // println(s"$server: $channel Topic:\n  $topic")
       handleJoinRequestMessage(topic)
 
+    case OnKick(channel, kickerNick, kickerLogin, kickerHostname, recipientNick, reason) =>
+      println(s"$server: Kicked from $channel, reason: $reason")
+
+
     case OnIncomingFileTransfer(transfer) =>
       if(dccReqestedBots contains transfer.getNick)
         actorOf(Props(classOf[Downloader], transfer),
@@ -124,6 +128,7 @@ class Downloader(transfer:DccFileTransfer) extends Actor {
 class ServerManager extends Actor {
   import context.actorOf
   import context.watch
+  import PircBotMessages._
 
   val commandServer = actorOf(Props(classOf[CommandServer], self), "commandserver")
 
@@ -138,9 +143,9 @@ class ServerManager extends Actor {
       // only create a new connection if none exists yet
       ircServers.getOrElseUpdate(server, newConnection(server)) ! download
 
+    case Join(server, channel) => ircServers(server) ! JoinChannel(channel)
+
     case Terminated(serverConnection) =>
       ircServers = ircServers.filter(_._2 != serverConnection)
-
-    case join@Join(server, _) => ircServers(server) ! join
   }
 }
