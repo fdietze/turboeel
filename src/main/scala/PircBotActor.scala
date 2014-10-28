@@ -11,6 +11,7 @@ object PircBotMessages {
   case class OnTopic(channel:String, topic:String, setBy:String, date:Long, changed:Boolean)
   case class OnKick(channel:String, kickerNick:String, kickerLogin:String, kickerHostname:String, recipientNick:String, reason:String)
   case class OnIncomingFileTransfer(transfer:DccFileTransfer)
+  case class OnNotice(sender:String, message:String)
 }
 
 trait PircBotActor extends Actor {
@@ -39,6 +40,11 @@ trait PircBotActor extends Actor {
     override def onIncomingFileTransfer(transfer:DccFileTransfer) {
       self ! OnIncomingFileTransfer(transfer)
     }
+    /// This method is called whenever a private message is sent to the PircBot
+    override def onNotice(sender:String, login:String, hostname:String, target:String, message:String) {
+      self ! OnNotice(sender, message)
+    }
+
   }
 
   def isInChannel(channel:String) = bot.getChannels.map(_.toLowerCase) contains channel.toLowerCase

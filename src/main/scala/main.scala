@@ -55,6 +55,11 @@ class IrcServerConnection(val server:String) extends PircBotActor {
       //TODO: watch downloaders per IrcServerConnection and manage queues, avoid duplicate downloads
       self ! JoinChannel(channel) //TODO: completely remove channel from request and only join on error message from bot?
       bot.sendMessage(botname, s"xdcc get #$pack")
+
+    case OnNotice(sender, message) =>
+      println(s"$server: Notice from ${sender}:\n  ${message}")
+      handleJoinRequestMessage(message)
+
   }
 
 
